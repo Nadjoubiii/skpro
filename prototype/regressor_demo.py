@@ -5,9 +5,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from sklearn.linear_model import LinearRegression, Ridge
-from sklearn.model_selection import train_test_split as sk_split
 
 
 def _ensure_local_skpro_on_path():
@@ -17,11 +14,46 @@ def _ensure_local_skpro_on_path():
     if root_str not in sys.path:
         sys.path.insert(0, root_str)
 
+
+def _ensure_sklearn_available():
+    """Fail with a clear message if scikit-learn is missing."""
+    try:
+        import sklearn  # noqa: F401
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "scikit-learn is required for the probabilistic regressor tab. "
+            "Add `scikit-learn` to deployment requirements and redeploy."
+        ) from exc
+
+
+def _make_base_estimator(base_est_name: str):
+    """Instantiate selected sklearn regressor with lazy imports."""
+    _ensure_sklearn_available()
+
+    if base_est_name == "Linear Regression":
+        from sklearn.linear_model import LinearRegression
+
+        return LinearRegression()
+    if base_est_name == "Ridge":
+        from sklearn.linear_model import Ridge
+
+        return Ridge()
+    if base_est_name == "Random Forest (50 trees)":
+        from sklearn.ensemble import RandomForestRegressor
+
+        return RandomForestRegressor(n_estimators=50, random_state=42)
+    if base_est_name == "Gradient Boosting (50 trees)":
+        from sklearn.ensemble import GradientBoostingRegressor
+
+        return GradientBoostingRegressor(n_estimators=50, random_state=42)
+
+    raise ValueError(f"Unknown base estimator: {base_est_name}")
+
 BASE_ESTIMATOR_OPTIONS = {
-    "Linear Regression": lambda: LinearRegression(),
-    "Ridge": lambda: Ridge(),
-    "Random Forest (50 trees)": lambda: RandomForestRegressor(n_estimators=50, random_state=42),
-    "Gradient Boosting (50 trees)": lambda: GradientBoostingRegressor(n_estimators=50, random_state=42),
+    "Linear Regression": None,
+    "Ridge": None,
+    "Random Forest (50 trees)": None,
+    "Gradient Boosting (50 trees)": None,
 }
 
 REGRESSOR_DESCRIPTIONS = {
@@ -113,7 +145,7 @@ def estimate_complexity(
 
 
 def build_regressor(regressor_name: str, base_est_name: str, n_bootstrap: int = 50):
-    base_est = BASE_ESTIMATOR_OPTIONS[base_est_name]()
+    base_est = _make_base_estimator(base_est_name)
     _ensure_local_skpro_on_path()
 
     if regressor_name == "Bootstrap":
@@ -134,7 +166,7 @@ def build_regressor(regressor_name: str, base_est_name: str, n_bootstrap: int = 
                 "Could not import skpro. Run the app from the repository root "
                 "or install local package with `pip install -e .`"
             ) from exc
-        base_est2 = BASE_ESTIMATOR_OPTIONS[base_est_name]()
+        base_est2 = _make_base_estimator(base_est_name)
         return ResidualDouble(base_est, base_est2)
 
     raise ValueError(f"Unknown regressor: {regressor_name}")
@@ -150,6 +182,9 @@ def fit_and_predict(
     coverage: float = 0.9,
 ) -> dict:
     """Fit a probabilistic regressor and return predictions + metrics."""
+    _ensure_sklearn_available()
+    from sklearn.model_selection import train_test_split as sk_split
+
     X_train, X_test, y_train, y_test = sk_split(
         X, y, test_size=test_size, random_state=42
     )
